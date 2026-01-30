@@ -151,7 +151,7 @@ class TestBvh(unittest.TestCase):
 
     def test_joints_names(self):
         mocap = Bvh.from_file("tests/test_mocapbank.bvh")
-        self.assertEqual(mocap.get_joints_names()[17], "RightKnee")
+        self.assertEqual(mocap.joint.keys()[17], "RightKnee")
 
     def test_joint_parent_index(self):
         mocap = Bvh.from_file("tests/test_mocapbank.bvh")

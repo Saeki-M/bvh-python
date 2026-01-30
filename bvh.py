@@ -127,16 +127,7 @@ class Bvh:
         iterate_joints(next(self.root.filter("ROOT")))
         return joints
 
-    def get_joints_names(self):
-        joints = []
-
-        def iterate_joints(joint):
-            joints.append(joint.value[1])
-            for child in joint.filter("JOINT"):
-                iterate_joints(child)
-
-        iterate_joints(next(self.root.filter("ROOT")))
-        return joints
+    # Use `bvh.joint.keys()` to list joint names instead of `get_joints_names()`
 
     def joint_direct_children(self, name):
         joint = self.get_joint(name)
@@ -269,13 +260,33 @@ class Bvh:
 
     # Proxy helpers for subscription-based access -------------------------------------------------
     class JointAccessor:
-        """Accessor available as `bvh.joint` which allows `bvh.joint[joint_name]` access."""
+        """Accessor available as `bvh.joint` which allows `bvh.joint[joint_name]` access.
+
+        Also provides mapping-like helpers:
+          - `bvh.joint.keys()` -> list of joint names
+          - `list(bvh.joint)` -> list of joint names
+          - `name in bvh.joint` -> membership test
+          - `len(bvh.joint)` -> number of joints
+        """
 
         def __init__(self, bvh):
             self._bvh = bvh
 
         def __getitem__(self, joint_name):
             return Bvh.JointProxy(self._bvh, joint_name)
+
+        def keys(self):
+            """Return a list of joint names in traversal order."""
+            return [j.value[1] for j in self._bvh.get_joints()]
+
+        def __iter__(self):
+            yield from self.keys()
+
+        def __contains__(self, name):
+            return name in self.keys()
+
+        def __len__(self):
+            return len(self.keys())
 
     class JointProxy:
         """Proxy object returned by `bvh.joint[joint_name]`.
@@ -287,6 +298,19 @@ class Bvh:
         def __init__(self, bvh, joint_name):
             self._bvh = bvh
             self._joint = joint_name
+
+        def keys(self):
+            """Return channel names for this joint in order."""
+            return self._bvh.joint_channels(self._joint)
+
+        def __iter__(self):
+            yield from self.keys()
+
+        def __contains__(self, name):
+            return name in self.keys()
+
+        def __len__(self):
+            return len(self.keys())
 
         def __getitem__(self, channel):
             # verify channel exists
