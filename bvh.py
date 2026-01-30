@@ -385,7 +385,8 @@ class Bvh:
         data += f"Frame Time:\t{self.frame_time}\n"
 
         for frame in self.frames:
-            data += "\t".join(map(str, frame)) + "\n"
+            # ensure frame channel values are written with 3 decimal places
+            data += "\t".join(format(f, ".3f") for f in frame) + "\n"
 
         return data
 
