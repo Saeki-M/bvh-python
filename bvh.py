@@ -45,6 +45,8 @@ class Bvh:
     def __init__(self, data):
         self.root = BvhNode()
         self.frames = self.tokenize(data)
+        # accessor for subscription-style joint/channel access
+        self.joint = Bvh.JointAccessor(self)
 
     @classmethod
     def from_file(cls, filename):
@@ -209,6 +211,140 @@ class Bvh:
                     values.append(float(frame[joint_index + channel_index]))
             all_frames.append(values)
         return all_frames
+
+    def set_frame_joint_channel(self, frame_index, joint, channel, value):
+        """Set a single channel value for a given frame and joint."""
+        joint_index = self.get_joint_channels_index(joint)
+        channel_index = self.get_joint_channel_index(joint, channel)
+        if channel_index == -1:
+            raise LookupError("channel not found")
+        self.frames[frame_index][joint_index + channel_index] = float(value)
+
+    def set_frame_joint_channels(self, frame_index, joint, channels, values):
+        """Set multiple channel values for a given frame and joint.
+
+        `values` can be a single scalar (which will be broadcast to all channels)
+        or an iterable of the same length as `channels`.
+        """
+        if isinstance(values, (int, float)):
+            values = [values] * len(channels)
+        if len(values) != len(channels):
+            raise ValueError("values must match channels length")
+        joint_index = self.get_joint_channels_index(joint)
+        for channel, val in zip(channels, values):
+            channel_index = self.get_joint_channel_index(joint, channel)
+            if channel_index == -1:
+                raise LookupError("channel not found")
+            self.frames[frame_index][joint_index + channel_index] = float(val)
+
+    def set_frames_joint_channels(self, joint, channels, values):
+        """Set channel values across all frames for a joint.
+
+        `values` may be:
+        - a single scalar -> set every specified channel to that scalar in every frame
+        - a list of scalars of length `nframes` when `len(channels) == 1`
+        - a list of lists with shape (nframes, len(channels))
+        """
+        n = self.nframes
+        per_frame = []
+        # single scalar
+        if isinstance(values, (int, float)):
+            per_frame = [[float(values)] * len(channels) for _ in range(n)]
+        # list of scalars for single channel
+        elif all(isinstance(v, (int, float)) for v in values) and len(channels) == 1:
+            if len(values) != n:
+                raise ValueError("values length must match number of frames")
+            per_frame = [[float(v)] for v in values]
+        else:
+            # assume list of lists
+            if len(values) != n:
+                raise ValueError("values length must match number of frames")
+            for v in values:
+                if len(v) != len(channels):
+                    raise ValueError("each frame entry must match channels length")
+                per_frame.append([float(x) for x in v])
+
+        for i, frame_vals in enumerate(per_frame):
+            self.set_frame_joint_channels(i, joint, channels, frame_vals)
+
+    # Proxy helpers for subscription-based access -------------------------------------------------
+    class JointAccessor:
+        """Accessor available as `bvh.joint` which allows `bvh.joint[joint_name]` access."""
+
+        def __init__(self, bvh):
+            self._bvh = bvh
+
+        def __getitem__(self, joint_name):
+            return Bvh.JointProxy(self._bvh, joint_name)
+
+    class JointProxy:
+        """Proxy object returned by `bvh.joint[joint_name]`.
+
+        Supports `joint_proxy[channel]` to get a `ChannelProxy` and
+        `joint_proxy[channel] = value` to set the channel across all frames.
+        """
+
+        def __init__(self, bvh, joint_name):
+            self._bvh = bvh
+            self._joint = joint_name
+
+        def __getitem__(self, channel):
+            # verify channel exists
+            if self._bvh.get_joint_channel_index(self._joint, channel) == -1:
+                raise LookupError("channel not found")
+            return Bvh.ChannelProxy(self._bvh, self._joint, channel)
+
+        def __setitem__(self, channel, value):
+            # verify channel exists
+            if self._bvh.get_joint_channel_index(self._joint, channel) == -1:
+                raise LookupError("channel not found")
+            self._bvh.set_frames_joint_channels(self._joint, [channel], value)
+
+    class ChannelProxy:
+        """Proxy object representing a specific channel of a joint.
+
+        Supports indexing to get/set frame-specific values, e.g.:
+            bvh.joint[joint][channel][frame]
+            bvh.joint[joint][channel][slice]
+        """
+
+        def __init__(self, bvh, joint, channel):
+            self._bvh = bvh
+            self._joint = joint
+            self._channel = channel
+
+        def __getitem__(self, index):
+            if isinstance(index, int):
+                return self._bvh.frame_joint_channel(index, self._joint, self._channel)
+            if isinstance(index, slice):
+                return [
+                    self._bvh.frame_joint_channel(i, self._joint, self._channel)
+                    for i in range(*index.indices(self._bvh.nframes))
+                ]
+            raise TypeError("index must be int or slice")
+
+        def __setitem__(self, index, value):
+            if isinstance(index, int):
+                self._bvh.set_frame_joint_channel(
+                    index, self._joint, self._channel, value
+                )
+                return
+            if isinstance(index, slice):
+                indices = list(range(*index.indices(self._bvh.nframes)))
+                if isinstance(value, (int, float)):
+                    for i in indices:
+                        self._bvh.set_frame_joint_channel(
+                            i, self._joint, self._channel, value
+                        )
+                    return
+                if len(value) != len(indices):
+                    raise ValueError("values length must match slice length")
+                for i, v in zip(indices, value):
+                    self._bvh.set_frame_joint_channel(i, self._joint, self._channel, v)
+                return
+            raise TypeError("index must be int or slice")
+
+    # end proxy helpers -------------------------------------------------------------------------
 
     def joint_parent(self, name):
         joint = self.get_joint(name)
