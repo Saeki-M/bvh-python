@@ -337,6 +337,20 @@ class Bvh:
             self._joint = joint
             self._channel = channel
 
+        def __repr__(self):
+            vals = [
+                self._bvh.frame_joint_channel(i, self._joint, self._channel)
+                for i in range(self._bvh.nframes)
+            ]
+            return repr(vals)
+
+        def __str__(self):
+            vals = [
+                self._bvh.frame_joint_channel(i, self._joint, self._channel)
+                for i in range(self._bvh.nframes)
+            ]
+            return str(vals)
+
         def __getitem__(self, index):
             if isinstance(index, int):
                 return self._bvh.frame_joint_channel(index, self._joint, self._channel)
